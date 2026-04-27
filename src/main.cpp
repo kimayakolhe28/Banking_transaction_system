@@ -6,7 +6,9 @@
  *               Semaphore, IPC, MySQL Persistence,
  *               Producer-Consumer, Bounded Buffer,
  *               Readers-Writers, Shared Memory,
- *               Message Queue, Pipes
+ *               Message Queue, Pipes,
+ *               Round Robin Scheduling, Priority Scheduling,
+ *               FCFS Scheduling
  * ================================================================
  */
 
@@ -21,7 +23,7 @@
 #include <cstring>
 #include <sstream>
 #include <cmath>
-
+#include <climits>
 #include "ConnectionPool.h"
 #include "Account.h"
 #include "Transaction.h"
@@ -29,6 +31,7 @@
 #include "BoundedQueue.h"
 #include "ReadWriteLock.h"
 #include "IPCManager.h"
+#include "CPUScheduler.h"
 
 // ── Terminal colors & styles ─────────────────────────────────
 #define RESET     "\033[0m"
@@ -65,13 +68,12 @@ void printHeader() {
     std::cout << "╔══════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║                                                                  ║\n";
     std::cout << "║      BANKING TRANSACTION PROCESSING SYSTEM                      ║\n";
-    std::cout << "║      OS Concepts Live Demo  |  16 Concepts  |  C++ / Linux      ║\n";
+    std::cout << "║      OS Concepts Live Demo  |  19 Concepts  |  C++ / Linux      ║\n";
     std::cout << "║                                                                  ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════════╝\n";
     std::cout << RESET << "\n";
 }
 
-// Topic banner — no demo numbers, just concept names
 void printTopic(const std::string& topic,
                 const std::string& mechanism,
                 const std::string& tagline) {
@@ -84,12 +86,10 @@ void printTopic(const std::string& topic,
     std::cout << RESET;
 }
 
-// Thin divider for sub-sections
 void printSubSection(const std::string& title) {
     std::cout << "\n  " << BOLD << BLUE << "── " << title << " ──" << RESET << "\n\n";
 }
 
-// Balance table
 void showBalances(std::vector<std::shared_ptr<Account>>& accounts) {
     std::cout << "\n";
     std::cout << "  ┌────────────┬──────────┬──────────────┐\n";
@@ -101,13 +101,12 @@ void showBalances(std::vector<std::shared_ptr<Account>>& accounts) {
     std::cout << "  └────────────┴──────────┴──────────────┘\n";
 }
 
-// Progress bar — uses block characters for smooth visual
 void printProgress(int done, int total, int ok, int fail, int threads) {
     int filled = done * 42 / total;
     std::cout << "\r  " << CYAN << "[" << RESET;
     for (int i = 0; i < 42; i++) {
-        if (i < filled) std::cout << GREEN << "\xe2\x96\x88" << RESET;  // █
-        else            std::cout << DIM   << "\xe2\x96\x91" << RESET;  // ░
+        if (i < filled) std::cout << GREEN << "\xe2\x96\x88" << RESET;
+        else            std::cout << DIM   << "\xe2\x96\x91" << RESET;
     }
     std::cout << CYAN << "]" << RESET
               << "  " << BOLD << done << "/" << total << RESET
@@ -117,7 +116,6 @@ void printProgress(int done, int total, int ok, int fail, int threads) {
               << "   " << std::flush;
 }
 
-// "Why it matters" explanation box
 void printWhyItMatters(const std::string& without, const std::string& withit) {
     std::cout << "\n";
     std::cout << "  ┌─ WHY THIS MATTERS ──────────────────────────────────────────┐\n";
@@ -656,7 +654,135 @@ void topicIPC(std::vector<std::shared_ptr<Account>>& accounts,
 }
 
 // ─────────────────────────────────────────────────────────────
-//  8. CONCURRENT STRESS TEST
+//  8. PAGE REPLACEMENT  (Week 6 — preserved as-is)
+//     NOTE: topicPageReplacement() is defined in
+//     PageReplacementCache.h (header-only). If you are on a
+//     machine that does not have that header yet, comment out
+//     the call in main() below.
+// ─────────────────────────────────────────────────────────────
+// Forward-declare so the compiler is happy even if the full
+// include is at the top of the file in your local copy.
+// If PageReplacementCache.h is NOT present, comment this block:
+// #include "PageReplacementCache.h"
+// void topicPageReplacement(...) { ... }
+// and remove the call in main().
+
+// ─────────────────────────────────────────────────────────────
+//  9. CPU SCHEDULING  (Week 7)
+// ─────────────────────────────────────────────────────────────
+void topicCPUScheduling() {
+    printTopic(
+        "CPU SCHEDULING ALGORITHMS",
+        "FCFS | Round Robin (quantum=2) | Priority (VIP=3, CURRENT=2, SAVINGS=1)",
+        "8 banking transactions scheduled — Gantt chart + waiting/turnaround stats"
+    );
+
+    printWhyItMatters(
+        "No scheduling: VIP transactions wait same as SAVINGS — unfair, slow",
+        "Priority scheduling: VIP served first; RR ensures fair CPU sharing"
+    );
+
+    // ── Define 8 transactions ────────────────────────────────
+    // (account_type, tx_type, burst_time_ms, arrival_time_ms)
+    std::vector<SchedTransaction> txns = {
+        SchedTransaction(1, "SAVINGS",  "DEPOSIT",  4, 0),
+        SchedTransaction(2, "VIP",      "TRANSFER", 3, 1),
+        SchedTransaction(3, "CURRENT",  "WITHDRAW", 5, 2),
+        SchedTransaction(4, "VIP",      "DEPOSIT",  2, 3),
+        SchedTransaction(5, "SAVINGS",  "TRANSFER", 6, 4),
+        SchedTransaction(6, "CURRENT",  "DEPOSIT",  3, 5),
+        SchedTransaction(7, "VIP",      "WITHDRAW", 1, 6),
+        SchedTransaction(8, "SAVINGS",  "DEPOSIT",  4, 7),
+    };
+
+    // ── Show the transaction set ──────────────────────────────
+    std::cout << "\n  " << BOLD << "Transaction Set (8 banking operations):\n" << RESET;
+    std::cout << "  ┌────┬──────────────────┬──────────┬──────────┬─────────┬──────────┐\n";
+    std::cout << "  │ " << BOLD << "ID" << RESET
+              << " │ " << BOLD << std::left << std::setw(16) << "Name"    << RESET
+              << " │ " << BOLD << std::setw(8)  << "Account" << RESET
+              << " │ " << BOLD << std::setw(8)  << "TxType"  << RESET
+              << " │ " << BOLD << std::setw(7)  << "Burst"   << RESET
+              << " │ " << BOLD << std::setw(8)  << "Arrival" << RESET
+              << " │\n";
+    std::cout << "  ├────┼──────────────────┼──────────┼──────────┼─────────┼──────────┤\n";
+
+    for (auto& t : txns) {
+        std::string color = (t.account_type=="VIP") ? RED :
+                            (t.account_type=="CURRENT") ? CYAN : YELLOW;
+        std::cout << "  │ " << color << std::right << std::setw(2) << t.id << RESET
+                  << " │ " << color << std::left << std::setw(16) << t.name    << RESET
+                  << " │ " << color << std::setw(8) << t.account_type << RESET
+                  << " │ " << std::setw(8)  << t.tx_type
+                  << " │ " << std::right << std::setw(5) << t.burst_time   << "ms │ "
+                  << std::setw(5) << t.arrival_time << "ms │\n";
+    }
+    std::cout << "  └────┴──────────────────┴──────────┴──────────┴─────────┴──────────┘\n";
+    CPUScheduler::printLegend();
+
+    // ── Run all three algorithms ──────────────────────────────
+    auto fcfs_res = CPUScheduler::fcfs(txns);
+    auto rr_res   = CPUScheduler::roundRobin(txns, 2);
+    auto pri_res  = CPUScheduler::priorityScheduling(txns);
+
+    // ── 9a: FCFS ─────────────────────────────────────────────
+    printSubSection("Algorithm A: FCFS — First Come First Served");
+    std::cout << DIM
+              << "  Theory: Transactions processed in arrival order. No preemption.\n"
+              << "  Problem: Long SAVINGS txn blocks VIP behind it (convoy effect).\n"
+              << RESET << "\n";
+    CPUScheduler::printGantt(fcfs_res);
+    CPUScheduler::printTransactionTable(fcfs_res);
+    CPUScheduler::printStats(fcfs_res);
+    pauseForEnter("Next: Round Robin ->");
+
+    // ── 9b: Round Robin ──────────────────────────────────────
+    printSubSection("Algorithm B: Round Robin — quantum = 2ms");
+    std::cout << DIM
+              << "  Theory: Each transaction gets exactly 2ms on CPU, then preempted.\n"
+              << "  Benefit: Fair CPU sharing — no transaction starves.\n"
+              << "  Banking use: ATM requests get CPU turns even during long transfers.\n"
+              << RESET << "\n";
+    CPUScheduler::printGantt(rr_res);
+    CPUScheduler::printTransactionTable(rr_res);
+    CPUScheduler::printStats(rr_res);
+    pauseForEnter("Next: Priority Scheduling ->");
+
+    // ── 9c: Priority ─────────────────────────────────────────
+    printSubSection("Algorithm C: Priority Scheduling — VIP first");
+    std::cout << DIM
+              << "  Theory: Highest priority runs first. Non-preemptive.\n"
+              << "  VIP (P=3) > CURRENT (P=2) > SAVINGS (P=1)\n"
+              << "  Banking use: VIP transfers jump the queue over SAVINGS deposits.\n"
+              << RESET << "\n";
+    CPUScheduler::printGantt(pri_res);
+    CPUScheduler::printTransactionTable(pri_res);
+    CPUScheduler::printStats(pri_res);
+    pauseForEnter("Next: Comparison ->");
+
+    // ── 9d: Side-by-side comparison ──────────────────────────
+    printSubSection("Algorithm Comparison — Side by Side");
+    CPUScheduler::printComparison({fcfs_res, rr_res, pri_res});
+
+    std::cout << "\n  " << BOLD << "Key Observations:\n" << RESET;
+    std::cout << "  " << CYAN   << "FCFS      " << RESET
+              << "— Simple, predictable. Suffers convoy effect (long job blocks short).\n";
+    std::cout << "  " << GREEN  << "Round Robin" << RESET
+              << " — Fairest. Best response time. Higher turnaround due to context switches.\n";
+    std::cout << "  " << RED    << "Priority  " << RESET
+              << "— VIP transactions always finish first. Risk of SAVINGS starvation.\n";
+
+    std::cout << "\n  " << BOLD << CYAN
+              << "  OS Connection: Linux uses CFS (Completely Fair Scheduler).\n"
+              << "  Our ThreadPool uses FIFO — this demo shows what happens when\n"
+              << "  we add priority awareness for VIP banking customers.\n"
+              << RESET;
+
+    pauseForEnter();
+}
+
+// ─────────────────────────────────────────────────────────────
+//  10. CONCURRENT STRESS TEST  (was Demo 8, now Demo 10)
 // ─────────────────────────────────────────────────────────────
 void topicStressTest(std::vector<std::shared_ptr<Account>>& accounts,
                      ConnectionPool& pool) {
@@ -699,7 +825,6 @@ void topicStressTest(std::vector<std::shared_ptr<Account>>& accounts,
         }
     });
 
-    // Live-updating progress bar
     while ((g_success + g_failed) < TOTAL) {
         int done = g_success + g_failed;
         printProgress(done, TOTAL, g_success.load(), g_failed.load(), tp.getActive());
@@ -735,7 +860,7 @@ void printSummary(ConnectionPool& pool) {
     std::cout << "\n\n" << BOLD << CYAN;
     std::cout << "╔══════════════════════════════════════════════════════════════════╗\n";
     std::cout << "║                    OS CONCEPTS SUMMARY                          ║\n";
-    std::cout << "║            Banking Transaction Processing System                 ║\n";
+    std::cout << "║    Banking Transaction Processing System  —  Week 1 → Week 7    ║\n";
     std::cout << "╚══════════════════════════════════════════════════════════════════╝\n";
     std::cout << RESET << "\n";
 
@@ -755,31 +880,41 @@ void printSummary(ConnectionPool& pool) {
                   << "   │ " << GREEN << " done " << RESET << "  │\n";
     };
 
+    // Week 1
     row("Threads",             "ThreadPool worker pool",    CYAN);
     row("Mutex",               "account_mutex per Account", CYAN);
     row("Condition Variable",  "task queue wake/sleep",     CYAN);
     row("Deadlock Prevention", "ordered lock acquisition",  CYAN);
     row("Process Scheduling",  "FIFO thread pool dispatch", CYAN);
     std::cout << "  ├──────────────────────────┼───────────────────────────┼────────┤\n";
+    // Week 2
     row("Semaphore",           "DB connection pool limit",  MAGENTA);
     row("Persistence",         "MySQL — survives restart",  MAGENTA);
     row("IPC Foundation",      "shared pool across threads",MAGENTA);
     std::cout << "  ├──────────────────────────┼───────────────────────────┼────────┤\n";
+    // Week 3
     row("Producer-Consumer",   "ATM/Web/Mobile -> queue",   YELLOW);
     row("Bounded Buffer",      "8-slot transaction queue",  YELLOW);
     row("Dual Semaphores",     "empty_slots + full_slots",  YELLOW);
     std::cout << "  ├──────────────────────────┼───────────────────────────┼────────┤\n";
+    // Week 4
     row("Readers-Writers",     "balance inquiry desk",      GREEN);
     row("Read-Write Lock",     "shared read, excl. write",  GREEN);
     row("Writer Priority",     "writers wait for readers",  GREEN);
     std::cout << "  ├──────────────────────────┼───────────────────────────┼────────┤\n";
+    // Week 5
     row("Shared Memory",       "fraud alert flag (SHM)",    RED);
     row("Message Queue",       "audit notifications (MQ)",  RED);
     row("Pipes",               "audit log stream fd[0/1]",  RED);
+    std::cout << "  ├──────────────────────────┼───────────────────────────┼────────┤\n";
+    // Week 7 (CPU Scheduling)
+    row("FCFS Scheduling",     "baseline comparison demo",  BLUE);
+    row("Round Robin",         "quantum=2 fair preemption", BLUE);
+    row("Priority Scheduling", "VIP=3 > CURRENT=2 > SAV=1",BLUE);
     std::cout << "  └──────────────────────────┴───────────────────────────┴────────┘\n";
 
     std::cout << "\n  " << BOLD << GREEN
-              << "Total: 16 OS Concepts  |  All verified in live demos above."
+              << "Total: 19 OS Concepts  |  Week 1+2+3+4+5+7  |  All verified in live demos."
               << RESET << "\n\n";
 
     pool.printStats();
@@ -815,14 +950,17 @@ int main() {
     std::cout << "\n  Press Enter to begin the demonstration...";
     std::cin.get();
 
-    topicPersistence(accounts, pool);         // Durability & Persistence
-    topicSemaphore(pool);                     // Semaphore
-    topicDeadlock(accounts, pool);            // Deadlock Prevention
-    topicMutex(accounts, pool);               // Mutex
-    topicProducerConsumer(accounts, pool);    // Producer-Consumer
-    topicReadersWriters(accounts);            // Readers-Writers
-    topicIPC(accounts, pool);                 // IPC
-    topicStressTest(accounts, pool);          // Stress Test
+    topicPersistence(accounts, pool);         // Demo 1 — Durability & Persistence
+    topicSemaphore(pool);                     // Demo 2 — Semaphore
+    topicDeadlock(accounts, pool);            // Demo 3 — Deadlock Prevention
+    topicMutex(accounts, pool);               // Demo 4 — Mutex
+    topicProducerConsumer(accounts, pool);    // Demo 5 — Producer-Consumer
+    topicReadersWriters(accounts);            // Demo 6 — Readers-Writers
+    topicIPC(accounts, pool);                 // Demo 7 — IPC
+    // Demo 8 — Page Replacement (Week 6)
+    // topicPageReplacement(accounts, pool);  // ← Uncomment when PageReplacementCache.h present
+    topicCPUScheduling();                     // Demo 9 — CPU Scheduling  (Week 7)
+    topicStressTest(accounts, pool);          // Demo 10 — Stress Test
 
     printSummary(pool);
 
